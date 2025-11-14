@@ -1,297 +1,423 @@
 import React, { createContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { User, Role, Scholarship } from '../types';
-import { USERS, SCHOLARSHIPS } from '../constants';
+import { SCHOLARSHIPS } from '../constants';
+import { db } from '../firebase/config.js';
+import { 
+  collection, 
+  getDocs, 
+  onSnapshot, 
+  query, 
+  where,
+  doc,
+  getDoc,
+  updateDoc,
+  addDoc,
+  deleteDoc,
+  writeBatch,
+  arrayUnion,
+  arrayRemove,
+  setDoc,
+} from 'https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js';
+
+
+interface SignupResult {
+  success: boolean;
+  errorCode?: 'username-exists' | 'check-failed' | 'unknown-error' | string;
+}
 
 interface AuthContextType {
   user: User | null;
+  loading: boolean;
   login: (username: string, password: string) => Promise<User | null>;
   logout: () => void;
-  signup: (details: Pick<User, 'username' | 'password'>) => Promise<boolean>;
+  signup: (details: { username: string; password: string; }) => Promise<SignupResult>;
   updatePassword: (oldPassword: string, newPassword: string) => Promise<'success' | 'invalid_password' | 'error'>;
   updateProfile: (details: { fullName: string; phone?: string; organization?: string }) => Promise<boolean>;
   isScholarshipSaved: (scholarshipId: string) => boolean;
   toggleSaveScholarship: (scholarshipId: string) => void;
   addCommentToScholarship: (scholarshipId: string, commentText: string) => void;
   toggleCommentVisibility: (scholarshipId: string, commentId: string) => void;
-  createScholarship: (data: Omit<Scholarship, 'id' | 'comments' | 'dateUploaded' | 'commentsLocked'>) => Scholarship | null;
-  updateScholarship: (id: string, data: Partial<Omit<Scholarship, 'id' | 'comments' | 'dateUploaded' | 'commentsLocked'>>) => Scholarship | null;
-  deleteScholarship: (id: string) => boolean;
-  getAllUsers: () => Omit<User, 'password'>[];
-  toggleUserLock: (userId: string) => void;
-  toggleScholarshipCommentLock: (scholarshipId: string) => void;
+  createScholarship: (data: Omit<Scholarship, 'id' | 'comments' | 'dateUploaded' | 'commentsLocked'>) => Promise<Scholarship | null>;
+  updateScholarship: (id: string, data: Partial<Omit<Scholarship, 'id' | 'comments' | 'dateUploaded' | 'commentsLocked'>>) => Promise<Scholarship | null>;
+  deleteScholarship: (id: string) => Promise<boolean>;
   getAllScholarships: () => Scholarship[];
   getScholarshipById: (id: string) => Scholarship | undefined;
+  toggleUserLock: (username: string) => void;
+  toggleScholarshipCommentLock: (scholarshipId: string) => void;
+  updateUserRole: (username: string, newRole: Role.USER | Role.MODDER) => Promise<boolean>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const seedScholarships = async () => {
+  if (SCHOLARSHIPS.length === 0) {
+    console.log('No seed data provided. Skipping database seeding.');
+    return;
+  }
+  const scholarshipsCollection = collection(db, 'scholarships');
+  const snapshot = await getDocs(scholarshipsCollection);
+  if (snapshot.empty) {
+    console.log('No scholarships found, seeding initial data...');
+    const batch = writeBatch(db);
+    SCHOLARSHIPS.forEach(scholarship => {
+      const docRef = doc(db, 'scholarships', scholarship.id);
+      batch.set(docRef, scholarship);
+    });
+    await batch.commit();
+    console.log('Scholarships seeded successfully.');
+  } else {
+    console.log('Scholarships collection already exists.');
+  }
+};
+
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-
-  // Use state for mock data to make it reactive and persistent
-  const [mockUsers, setMockUsers] = useState<User[]>(() => {
-    try {
-      const stored = localStorage.getItem('mockUsers');
-      if (stored) return JSON.parse(stored);
-    } catch (e) { console.error("Failed to parse mockUsers from localStorage", e); }
-    return [...USERS]; // Fallback to constants
-  });
-
-  const [mockScholarships, setMockScholarships] = useState<Scholarship[]>(() => {
-    try {
-      const stored = localStorage.getItem('mockScholarships');
-      if (stored) return JSON.parse(stored);
-    } catch (e) { console.error("Failed to parse mockScholarships from localStorage", e); }
-    return [...SCHOLARSHIPS];
-  });
-
-  // Persist mock data changes to localStorage
-  useEffect(() => {
-    localStorage.setItem('mockUsers', JSON.stringify(mockUsers));
-  }, [mockUsers]);
-
-  useEffect(() => {
-    localStorage.setItem('mockScholarships', JSON.stringify(mockScholarships));
-  }, [mockScholarships]);
-
-  useEffect(() => {
-    try {
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        setUser(JSON.parse(storedUser));
-      }
-    } catch (error) {
-      console.error("Failed to parse user from localStorage", error);
-      localStorage.removeItem('user');
-    }
-  }, []);
-
-  const logout = useCallback(() => {
-    setUser(null);
-    localStorage.removeItem('user');
-  }, []);
-
-  // This effect keeps the logged-in user's state in sync with the master user list.
-  // For example, if an admin locks the user's account, this will update the user object
-  // in the state and localStorage, effectively propagating the change to the active session.
-  useEffect(() => {
-    if (user) {
-        const latestUserData = mockUsers.find(u => u.id === user.id);
-        if (latestUserData) {
-            const userToStore = { ...latestUserData };
-            delete userToStore.password;
-            // Only update if there's an actual change to avoid infinite loops
-            if (JSON.stringify(user) !== JSON.stringify(userToStore)) {
-                setUser(userToStore);
-                localStorage.setItem('user', JSON.stringify(userToStore));
-            }
-        } else {
-            // User might have been deleted, so log them out
-            logout();
-        }
-    }
-  }, [mockUsers, user, logout]);
-
-  const login = useCallback(async (username: string, password: string): Promise<User | null> => {
-    const foundUser = mockUsers.find(
-      (u) => u.username === username && u.password === password
-    );
-    if (foundUser && !foundUser.isLocked) {
-      const userToStore = { ...foundUser };
-      delete userToStore.password; // Don't store password in state/localStorage
-      setUser(userToStore);
-      localStorage.setItem('user', JSON.stringify(userToStore));
-      return userToStore;
-    }
-    return null;
-  }, [mockUsers]);
-
-  const signup = useCallback(async (details: Pick<User, 'username' | 'password'>): Promise<boolean> => {
-    if (mockUsers.some((u) => u.username === details.username)) {
-      return false; // Username already exists
-    }
-    const newUser: User = {
-      id: `user-${Date.now()}`,
-      username: details.username,
-      password: details.password,
-      fullName: details.username, // Default fullName to username
-      role: Role.USER,
-      savedScholarshipIds: [],
-      optionalInfo: {},
-      isLocked: false,
-    };
-    setMockUsers(prev => [...prev, newUser]);
-    
-    // Auto-login after signup
-    const userToStore = { ...newUser };
-    delete userToStore.password;
-    setUser(userToStore);
-    localStorage.setItem('user', JSON.stringify(userToStore));
-    return true;
-  }, [mockUsers]);
+  const [loading, setLoading] = useState(true);
+  const [scholarships, setScholarships] = useState<Scholarship[]>([]);
   
-  const updatePassword = useCallback(async (oldPassword: string, newPassword: string): Promise<'success' | 'invalid_password' | 'error'> => {
-    if (!user) return 'error';
-    const userIndex = mockUsers.findIndex(u => u.id === user.id);
-    if (userIndex !== -1) {
-        const currentUser = mockUsers[userIndex];
-        if (currentUser.password !== oldPassword) {
-            return 'invalid_password';
+  useEffect(() => {
+    seedScholarships();
+
+    const scholarshipsQuery = query(collection(db, 'scholarships'));
+    const unsubscribeScholarships = onSnapshot(scholarshipsQuery, (snapshot) => {
+      const scholarshipsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Scholarship));
+      setScholarships(scholarshipsData);
+    });
+
+    try {
+        const storedUser = localStorage.getItem('loggedInUser');
+        if (storedUser) {
+            setUser(JSON.parse(storedUser));
         }
-        setMockUsers(prev => prev.map((u, index) => index === userIndex ? { ...u, password: newPassword } : u));
-        return 'success';
+    } catch (error) {
+        console.error("Failed to parse user from localStorage", error);
+        localStorage.removeItem('loggedInUser');
     }
-    return 'error';
-  }, [user, mockUsers]);
+    setLoading(false);
 
-  const updateProfile = useCallback(async (details: { fullName: string; phone?: string; organization?: string }) => {
+    return () => {
+      unsubscribeScholarships();
+    };
+  }, []);
+  
+  const login = async (username: string, password: string): Promise<User | null> => {
+    try {
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('username', '==', username));
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) {
+            console.error("Login failed: User not found.");
+            return null;
+        }
+
+        const userDoc = querySnapshot.docs[0];
+        const firestoreData = userDoc.data();
+
+        if (firestoreData.password !== password) {
+            console.error("Login failed: Incorrect password.");
+            return null;
+        }
+
+        if (firestoreData.isLocked) {
+            console.error("Login failed: Account is locked.");
+            return null;
+        }
+        
+        const rawRole = firestoreData.role;
+        let role: Role = Role.USER;
+        if (rawRole === 'administration' || rawRole === Role.ADMIN) {
+            role = Role.ADMIN;
+        } else if (rawRole === 'modder' || rawRole === 'moderator' || rawRole === Role.MODDER) {
+            role = Role.MODDER;
+        } else if (rawRole === Role.USER) {
+            role = Role.USER;
+        }
+        
+        const { password: _p, ...publicData } = firestoreData;
+        
+        const finalUser: User = {
+            ...(publicData as any),
+            id: userDoc.id, 
+            role: role,
+            username: firestoreData.username
+        };
+        
+        setUser(finalUser);
+        localStorage.setItem('loggedInUser', JSON.stringify(finalUser));
+        return finalUser;
+
+    } catch (error) {
+        console.error("Login failed: ", error);
+        return null;
+    }
+  };
+
+
+  const logout = async () => {
+    setUser(null);
+    localStorage.removeItem('loggedInUser');
+  };
+
+  const signup = async (details: { username: string; password: string; }): Promise<SignupResult> => {
+    const { username, password } = details;
+
+    try {
+        const userDocRef = doc(db, 'users', username);
+        const docSnap = await getDoc(userDocRef);
+
+        if (docSnap.exists()) {
+            console.error("Signup failed: Username is already taken.");
+            return { success: false, errorCode: 'username-exists' };
+        }
+    } catch (error: any) {
+        console.error("Error checking for existing username.", error);
+        return { success: false, errorCode: 'check-failed' };
+    }
+
+    try {
+      if (!password) throw new Error("Password is required for signup.");
+      
+      const newUserDoc = {
+        username: username,
+        password: password,
+        fullName: username,
+        role: Role.USER,
+        savedScholarshipIds: [],
+        optionalInfo: {},
+        isLocked: false,
+      };
+      
+      await setDoc(doc(db, "users", username), newUserDoc);
+      
+      const { password: _, ...userDataForState } = newUserDoc;
+      const loggedInUser: User = {
+          ...(userDataForState as any),
+          id: username
+      }
+      setUser(loggedInUser);
+      localStorage.setItem('loggedInUser', JSON.stringify(loggedInUser));
+
+      return { success: true };
+    } catch (error: any) {
+      console.error("Signup failed: ", error);
+      return { success: false, errorCode: error.code || 'unknown-error' };
+    }
+  };
+
+  const updateProfile = async (details: { fullName: string; phone?: string; organization?: string }): Promise<boolean> => {
     if (!user) return false;
-
-    // We need to find the full user object including password to update mockUsers
-    const fullUser = mockUsers.find(u => u.id === user.id);
-    if (!fullUser) return false;
-
-    const updatedFullUser: User = {
-        ...fullUser,
+    try {
+      const userDocRef = doc(db, 'users', user.username);
+      const updateData: any = {
         fullName: details.fullName,
         optionalInfo: {
-            ...fullUser.optionalInfo,
-            phone: details.phone,
-            organization: details.organization,
+            ...user.optionalInfo,
+            phone: details.phone || '',
+            organization: details.organization || ''
         }
-    };
-    
-    setMockUsers(prev => prev.map(u => u.id === user.id ? updatedFullUser : u));
-    
-    // Update the user state without the password
-    const userToStore = { ...updatedFullUser };
-    delete userToStore.password;
-    setUser(userToStore);
-    localStorage.setItem('user', JSON.stringify(userToStore));
-
-    return true;
-  }, [user, mockUsers]);
-
-  const isScholarshipSaved = useCallback((scholarshipId: string) => {
-    return user?.savedScholarshipIds.includes(scholarshipId) ?? false;
-  }, [user]);
-  
-  const toggleSaveScholarship = useCallback((scholarshipId: string) => {
-    if (!user) return;
-    
-    let updatedSavedIds;
-    if (user.savedScholarshipIds.includes(scholarshipId)) {
-      updatedSavedIds = user.savedScholarshipIds.filter(id => id !== scholarshipId);
-    } else {
-      updatedSavedIds = [...user.savedScholarshipIds, scholarshipId];
+      };
+      await updateDoc(userDocRef, updateData);
+      const updatedUser = { ...user, ...updateData };
+      setUser(updatedUser);
+      localStorage.setItem('loggedInUser', JSON.stringify(updatedUser));
+      return true;
+    } catch (error) {
+      console.error("Profile update failed:", error);
+      return false;
     }
-    
-    setMockUsers(prev => prev.map(u => u.id === user.id ? { ...u, savedScholarshipIds: updatedSavedIds } : u));
-  }, [user]);
-
-  const addCommentToScholarship = useCallback((scholarshipId: string, commentText: string): void => {
-    if (!user || user.isLocked) return;
-
-    setMockScholarships(prev => prev.map(s => {
-      if (s.id === scholarshipId && !s.commentsLocked) {
-        const newComment = {
-          id: `comment-${Date.now()}`,
-          userId: user.id,
-          userFullName: user.fullName,
-          text: commentText,
-          timestamp: new Date().toISOString()
-        };
-        return { ...s, comments: [...s.comments, newComment] };
-      }
-      return s;
-    }));
-  }, [user]);
+  };
   
-  const toggleCommentVisibility = useCallback((scholarshipId: string, commentId: string): void => {
-    if (user?.role !== Role.ADMIN) return;
-    
-    setMockScholarships(prev => prev.map(s => {
-        if (s.id === scholarshipId) {
-            const updatedComments = s.comments.map(c => {
-                if (c.id === commentId) {
-                    return { ...c, isHidden: !c.isHidden };
-                }
-                return c;
-            });
-            return { ...s, comments: updatedComments };
+  const updatePassword = async (oldPassword: string, newPassword: string): Promise<'success' | 'invalid_password' | 'error'> => {
+    if (!user) {
+        console.error("User not logged in.");
+        return 'error';
+    }
+
+    try {
+        const userDocRef = doc(db, 'users', user.username);
+        const userDoc = await getDoc(userDocRef);
+
+        if (!userDoc.exists()) {
+            console.error("User document not found.");
+            return 'error';
         }
-        return s;
-    }));
+
+        const userData = userDoc.data();
+        if (userData.password !== oldPassword) {
+            return 'invalid_password';
+        }
+
+        await updateDoc(userDocRef, { password: newPassword });
+        return 'success';
+    } catch (error: any) {
+        console.error("Password update failed:", error);
+        return 'error';
+    }
+};
+
+
+  const isScholarshipSaved = useCallback((scholarshipId: string): boolean => {
+    return user?.savedScholarshipIds.includes(scholarshipId) || false;
   }, [user]);
 
-  const createScholarship = useCallback((data: Omit<Scholarship, 'id' | 'comments' | 'dateUploaded' | 'commentsLocked'>): Scholarship | null => {
-    if (user?.role !== Role.ADMIN) return null;
-    const newScholarship: Scholarship = {
-      ...data,
-      id: `scholarship-${Date.now()}`,
-      dateUploaded: new Date().toISOString(),
-      comments: [],
-      commentsLocked: false,
+  const toggleSaveScholarship = useCallback(async (scholarshipId: string) => {
+    if (!user) return;
+    const userDocRef = doc(db, 'users', user.username);
+    const isCurrentlySaved = isScholarshipSaved(scholarshipId);
+    try {
+      let updatedUser;
+      if (isCurrentlySaved) {
+        await updateDoc(userDocRef, {
+          savedScholarshipIds: arrayRemove(scholarshipId)
+        });
+        updatedUser = { ...user, savedScholarshipIds: user.savedScholarshipIds.filter(id => id !== scholarshipId) };
+      } else {
+        await updateDoc(userDocRef, {
+          savedScholarshipIds: arrayUnion(scholarshipId)
+        });
+        updatedUser = { ...user, savedScholarshipIds: [...user.savedScholarshipIds, scholarshipId] };
+      }
+      setUser(updatedUser);
+      localStorage.setItem('loggedInUser', JSON.stringify(updatedUser));
+    } catch (error) {
+        console.error("Failed to toggle save scholarship:", error);
+    }
+  }, [user, isScholarshipSaved]);
+  
+  const addCommentToScholarship = async (scholarshipId: string, commentText: string) => {
+    if (!user) return;
+    const scholarshipDocRef = doc(db, 'scholarships', scholarshipId);
+    const newComment = {
+      id: `comment-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      userId: user.id,
+      userFullName: user.fullName,
+      text: commentText,
+      timestamp: new Date().toISOString()
     };
-    setMockScholarships(prev => [newScholarship, ...prev]);
-    return newScholarship;
-  }, [user]);
-
-  const updateScholarship = useCallback((id: string, data: Partial<Omit<Scholarship, 'id' | 'comments' | 'dateUploaded' | 'commentsLocked'>>): Scholarship | null => {
-    if (user?.role !== Role.ADMIN) return null;
-    
-    let updatedScholarship: Scholarship | null = null;
-    setMockScholarships(prev => prev.map(s => {
-      if (s.id === id) {
-        updatedScholarship = { ...s, ...data };
-        return updatedScholarship;
-      }
-      return s;
-    }));
-    return updatedScholarship;
-  }, [user]);
-
-  const deleteScholarship = useCallback((id: string): boolean => {
-    if (user?.role !== Role.ADMIN) return false;
-    setMockScholarships(prev => prev.filter(s => s.id !== id));
-    return true;
-  }, [user]);
+    await updateDoc(scholarshipDocRef, {
+      comments: arrayUnion(newComment)
+    });
+  };
   
-  const getAllUsers = useCallback((): Omit<User, 'password'>[] => {
-      if (user?.role !== Role.ADMIN) return [];
-      return mockUsers.map(({ password, ...rest }) => rest);
-  }, [user, mockUsers]);
+  const toggleCommentVisibility = async (scholarshipId: string, commentId: string) => {
+    if (user?.role !== Role.MODDER) return;
+    const scholarshipDocRef = doc(db, 'scholarships', scholarshipId);
+    const scholarshipDoc = await getDoc(scholarshipDocRef);
+    if (scholarshipDoc.exists()) {
+        const scholarshipData = scholarshipDoc.data() as Scholarship;
+        const updatedComments = scholarshipData.comments.map(comment => {
+            if (comment.id === commentId) {
+                return { ...comment, isHidden: !comment.isHidden };
+            }
+            return comment;
+        });
+        await updateDoc(scholarshipDocRef, { comments: updatedComments });
+    }
+  };
 
-  const toggleUserLock = useCallback((userId: string): void => {
-    if (user?.role !== Role.ADMIN || user.id === userId) return;
-    
-    setMockUsers(prev => prev.map(u => 
-        u.id === userId ? { ...u, isLocked: !u.isLocked } : u
-    ));
-  }, [user]);
+  const createScholarship = async (data: Omit<Scholarship, 'id' | 'comments' | 'dateUploaded' | 'commentsLocked'>): Promise<Scholarship | null> => {
+     if (user?.role !== Role.MODDER) return null;
+     try {
+       const newScholarship: Omit<Scholarship, 'id'> = {
+         ...data,
+         dateUploaded: new Date().toISOString(),
+         comments: [],
+         commentsLocked: false,
+       };
+       const docRef = await addDoc(collection(db, 'scholarships'), newScholarship);
+       return { id: docRef.id, ...newScholarship };
+     } catch (error) {
+       console.error("Error creating scholarship:", error);
+       return null;
+     }
+  };
 
-  const toggleScholarshipCommentLock = useCallback((scholarshipId: string): void => {
+  const updateScholarship = async (id: string, data: Partial<Omit<Scholarship, 'id'>>): Promise<Scholarship | null> => {
+    if (user?.role !== Role.MODDER) return null;
+    try {
+        const scholarshipDocRef = doc(db, 'scholarships', id);
+        await updateDoc(scholarshipDocRef, data);
+        const updatedDoc = await getDoc(scholarshipDocRef);
+        return { id: updatedDoc.id, ...updatedDoc.data() } as Scholarship;
+    } catch(error) {
+        console.error("Error updating scholarship: ", error);
+        return null;
+    }
+  };
+  
+  const deleteScholarship = async (id: string): Promise<boolean> => {
+    if (user?.role !== Role.MODDER) return false;
+    try {
+        await deleteDoc(doc(db, 'scholarships', id));
+        return true;
+    } catch (error) {
+        console.error("Error deleting scholarship: ", error);
+        return false;
+    }
+  };
+  
+  const toggleUserLock = async (username: string) => {
     if (user?.role !== Role.ADMIN) return;
-
-    setMockScholarships(prev => prev.map(s => {
-        if (s.id === scholarshipId) {
-            return { ...s, commentsLocked: !s.commentsLocked };
-        }
-        return s;
-    }));
-  }, [user]);
-
-  const getAllScholarships = useCallback((): Scholarship[] => {
-    return mockScholarships;
-  }, [mockScholarships]);
+    const userDocRef = doc(db, 'users', username);
+    const userDoc = await getDoc(userDocRef);
+    if (userDoc.exists()) {
+      await updateDoc(userDocRef, {
+        isLocked: !userDoc.data().isLocked
+      });
+    }
+  };
   
-  const getScholarshipById = useCallback((id: string): Scholarship | undefined => {
-    return mockScholarships.find(s => s.id === id);
-  }, [mockScholarships]);
+  const toggleScholarshipCommentLock = async (scholarshipId: string) => {
+    if (user?.role !== Role.MODDER) return;
+    const scholarshipDocRef = doc(db, 'scholarships', scholarshipId);
+    const scholarshipDoc = await getDoc(scholarshipDocRef);
+     if (scholarshipDoc.exists()) {
+      await updateDoc(scholarshipDocRef, {
+        commentsLocked: !scholarshipDoc.data().commentsLocked
+      });
+    }
+  };
+  
+  const updateUserRole = async (username: string, newRole: Role.USER | Role.MODDER): Promise<boolean> => {
+    if (user?.role !== Role.ADMIN) return false;
+    
+    try {
+      const userDocRef = doc(db, 'users', username);
+      await updateDoc(userDocRef, { role: newRole });
+      return true;
+    } catch (error) {
+      console.error("Error updating user role:", error);
+      return false;
+    }
+  };
 
+  const getAllScholarships = useCallback(() => scholarships, [scholarships]);
+  const getScholarshipById = useCallback((id: string) => scholarships.find(s => s.id === id), [scholarships]);
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, signup, updatePassword, updateProfile, isScholarshipSaved, toggleSaveScholarship, addCommentToScholarship, toggleCommentVisibility, createScholarship, updateScholarship, deleteScholarship, getAllUsers, toggleUserLock, toggleScholarshipCommentLock, getAllScholarships, getScholarshipById }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      loading, 
+      login, 
+      logout, 
+      signup, 
+      updatePassword,
+      updateProfile,
+      isScholarshipSaved,
+      toggleSaveScholarship,
+      addCommentToScholarship,
+      toggleCommentVisibility,
+      createScholarship,
+      updateScholarship,
+      deleteScholarship,
+      getAllScholarships,
+      getScholarshipById,
+      toggleUserLock,
+      toggleScholarshipCommentLock,
+      updateUserRole
+    }}>
       {children}
     </AuthContext.Provider>
   );

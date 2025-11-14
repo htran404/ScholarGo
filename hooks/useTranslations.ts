@@ -3,8 +3,12 @@ import { useLanguage } from './useLanguage';
 import { translations } from '../i18n/translations';
 
 // Define types for better type safety
-// FIX: Export TranslationKey to be used in other components for type casting.
-export type TranslationKey = keyof typeof translations['en'];
+type AllTranslationKeys = keyof typeof translations['en'];
+
+// FIX: Export a refined `TranslationKey` type that excludes keys with non-renderable return types (like 'teamMembers').
+// This allows components using dynamic keys (e.g., for tags) to correctly resolve the `t` function overload
+// to the one returning `React.ReactNode`, preventing TypeScript errors.
+export type TranslationKey = Exclude<AllTranslationKeys, 'teamMembers'>;
 type TeamMember = { name: string; role: string; bio: string; };
 
 export const useTranslations = () => {
@@ -14,8 +18,8 @@ export const useTranslations = () => {
   // This resolves TypeScript errors where the inferred return type was too broad
   // and included non-renderable types (like `TeamMember[]`) for rendering contexts.
   function t(key: 'teamMembers'): TeamMember[];
-  function t(key: Exclude<TranslationKey, 'teamMembers'>, replacements?: { [key: string]: string | number | React.ReactNode }): React.ReactNode;
-  function t(key: TranslationKey, replacements?: { [key: string]: string | number | React.ReactNode }): React.ReactNode | TeamMember[] {
+  function t(key: TranslationKey, replacements?: { [key: string]: string | number | React.ReactNode }): React.ReactNode;
+  function t(key: AllTranslationKeys, replacements?: { [key: string]: string | number | React.ReactNode }): React.ReactNode | TeamMember[] {
     const text = translations[language][key] || translations.en[key];
 
     if (typeof text !== 'string') {

@@ -40,14 +40,14 @@ const ScholarshipDetailPage: React.FC = () => {
   };
   
   const handleToggleVisibility = (commentId: string) => {
-    if (user?.role !== Role.ADMIN) return;
+    if (user?.role !== Role.MODDER) return;
     toggleCommentVisibility(scholarship.id, commentId);
   };
   
   const commentsToShow = useMemo(() => {
     if (!scholarship) return [];
-    if (user?.role === Role.ADMIN) {
-        return scholarship.comments; // Admin sees all
+    if (user?.role === Role.ADMIN || user?.role === Role.MODDER) {
+        return scholarship.comments; // Admins and Mods see all
     }
     return scholarship.comments.filter(comment => !comment.isHidden); // Users see only visible
   }, [scholarship.comments, user]);
@@ -160,12 +160,12 @@ const ScholarshipDetailPage: React.FC = () => {
                 <div>
                   <div className="flex items-center mb-2">
                     <p className="font-semibold text-blue-600 dark:text-blue-400">{comment.userFullName}</p>
-                    {user?.role === Role.ADMIN && comment.isHidden && <span className="text-xs ml-2 bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-100 px-2 py-0.5 rounded-full font-medium">{t('hidden')}</span>}
+                    {(user?.role === Role.ADMIN || user?.role === Role.MODDER) && comment.isHidden && <span className="text-xs ml-2 bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-100 px-2 py-0.5 rounded-full font-medium">{t('hidden')}</span>}
                   </div>
                   <p className="text-xs text-slate-500 mb-2">{new Date(comment.timestamp).toLocaleString()}</p>
                   <p>{comment.text}</p>
                 </div>
-                {user?.role === Role.ADMIN && (
+                {user?.role === Role.MODDER && (
                   <button 
                     onClick={() => handleToggleVisibility(comment.id)} 
                     className="text-sm font-medium ml-4 flex-shrink-0"

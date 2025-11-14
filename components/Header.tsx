@@ -20,11 +20,13 @@ const Header: React.FC = () => {
     setLanguage(language === 'en' ? 'vi' : 'en');
   };
 
+  const isPortalUser = user?.role === Role.ADMIN || user?.role === Role.MODDER;
+
   return (
     <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm sticky top-0 z-40 w-full border-b border-slate-200 dark:border-slate-800">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {user?.role === Role.ADMIN ? (
+          {isPortalUser ? (
              <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
                 {t('scholarGo')}
               </span>
@@ -35,7 +37,7 @@ const Header: React.FC = () => {
           )}
 
           <nav className="hidden md:flex items-center space-x-6 text-sm font-medium">
-            {user?.role !== Role.ADMIN && (
+            {!isPortalUser && (
               <>
                 <NavLink to="/" className={({ isActive }) => isActive ? activeLinkClass : inactiveLinkClass}>{t('home')}</NavLink>
                 <NavLink to="/search" className={({ isActive }) => isActive ? activeLinkClass : inactiveLinkClass}>{t('search')}</NavLink>
@@ -62,13 +64,19 @@ const Header: React.FC = () => {
             </button>
             {user ? (
               <div className="relative group">
-                <Link to={user.role === Role.ADMIN ? '#' : '/account'} className="flex items-center space-x-2 p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700">
+                <button className="flex items-center space-x-2 p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700">
                   <UserCircleIcon/>
                   <span className="text-sm font-medium hidden sm:block">{user.fullName}</span>
-                </Link>
+                </button>
                 <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-md shadow-lg py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 invisible group-hover:visible">
-                    {user.role !== Role.ADMIN && (
+                    {user.role === Role.USER && (
                       <Link to="/account" className="block px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">{t('myAccount')}</Link>
+                    )}
+                    {user.role === Role.ADMIN && (
+                        <Link to="/admin" className="block px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">{t('adminPortal')}</Link>
+                    )}
+                    {user.role === Role.MODDER && (
+                        <Link to="/modder-portal" className="block px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">{t('modderPortal')}</Link>
                     )}
                     <button onClick={logout} className="w-full text-left block px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">
                         {t('signOut')}

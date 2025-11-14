@@ -20,14 +20,18 @@ const SignUpPage: React.FC = () => {
         return;
     }
     
-    const success = await signup({
+    const result = await signup({
       username,
       password,
     });
-    if (success) {
+    if (result.success) {
       navigate('/');
     } else {
-      setError(t('usernameExistsError') as string);
+      if (result.errorCode === 'username-exists') {
+        setError(t('usernameExistsError') as string);
+      } else {
+        setError(t('signupFailedError') as string);
+      }
     }
   };
 

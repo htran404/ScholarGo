@@ -1,14 +1,13 @@
-
 export enum Role {
   GUEST = 'GUEST',
   USER = 'USER',
-  ADMIN = 'ADMIN'
+  ADMIN = 'ADMIN',
+  MODDER = 'MODDER',
 }
 
 export interface User {
   id: string;
   username: string;
-  password?: string; // Should not be stored in client state long-term
   fullName: string;
   role: Role;
   optionalInfo?: {

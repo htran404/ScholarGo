@@ -19,7 +19,10 @@ const SignInPage: React.FC = () => {
     if (user) {
       if (user.role === Role.ADMIN) {
         navigate('/admin');
-      } else {
+      } else if (user.role === Role.MODDER) {
+        navigate('/modder-portal');
+      }
+      else {
         navigate('/');
       }
     } else {
