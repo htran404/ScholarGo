@@ -1,0 +1,5 @@
+{
+  "name": "Student Scholarship Finder",
+  "description": "A web application that provides users with essential information about student scholarships. Users can search, filter, and save scholarships. The app features user authentication, a commenting system, and light/dark themes.",
+  "requestFramePermissions": []
+}
