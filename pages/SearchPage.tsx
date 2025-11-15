@@ -182,7 +182,7 @@ const SearchPage: React.FC = () => {
 
       <div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
-          <h2 className="text-xl font-semibold mb-2 sm:mb-0">
+          <h2 className="text-xl font-semibold mb-2 sm:mb-0 dark:text-slate-100">
             {t('scholarshipsFound', { count: filteredAndSortedScholarships.length })}
           </h2>
           <div className="flex items-center space-x-2">
@@ -223,7 +223,7 @@ const SearchPage: React.FC = () => {
         ) : (
           <div className="text-center py-16 bg-slate-100 dark:bg-slate-800 rounded-lg">
             <p className="text-xl text-slate-600 dark:text-slate-400">{t('noScholarshipsFound')}</p>
-            <p className="text-slate-500 mt-2">{t('noScholarshipsHint')}</p>
+            <p className="text-slate-500 dark:text-slate-400 mt-2">{t('noScholarshipsHint')}</p>
           </div>
         )}
       </div>

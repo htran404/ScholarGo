@@ -86,9 +86,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     try {
-        const storedUser = localStorage.getItem('loggedInUser');
-        if (storedUser) {
-            setUser(JSON.parse(storedUser));
+        const storedUserJSON = localStorage.getItem('loggedInUser');
+        if (storedUserJSON) {
+            const storedUser = JSON.parse(storedUserJSON);
+            // Ensure savedScholarshipIds is an array to prevent crashes on load
+            if (!storedUser.savedScholarshipIds) {
+                storedUser.savedScholarshipIds = [];
+            }
+            setUser(storedUser);
         }
     } catch (error) {
         console.error("Failed to parse user from localStorage", error);
@@ -141,7 +146,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ...(publicData as any),
             id: userDoc.id, 
             role: role,
-            username: firestoreData.username
+            username: firestoreData.username,
+            savedScholarshipIds: firestoreData.savedScholarshipIds || [],
         };
         
         setUser(finalUser);
